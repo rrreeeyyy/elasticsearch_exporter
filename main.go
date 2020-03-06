@@ -152,13 +152,20 @@ func newPromHandler(ctx context.Context, logger log.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		registry := prometheus.NewRegistry()
 
+		target := r.URL.Query().Get("target")
+		if target != "" {
+			esURI = &target
+		}
+
 		esURL, err := url.Parse(*esURI)
 		if err != nil {
 			_ = level.Error(logger).Log(
 				"msg", "failed to parse es.uri",
 				"err", err,
 			)
-			os.Exit(1)
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("failed to parse es.uri or target"))
+			return
 		}
 
 		// returns nil if not provided and falls back to simple TCP.
@@ -190,7 +197,9 @@ func newPromHandler(ctx context.Context, logger log.Logger) http.HandlerFunc {
 			_ = level.Info(logger).Log("msg", "initial cluster info call timed out")
 		default:
 			_ = level.Error(logger).Log("msg", "failed to run cluster info retriever", "err", runErr)
-			os.Exit(1)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("failed to run cluster info retriever"))
+			return
 		}
 
 		// register cluster info retriever as prometheus collector
@@ -204,7 +213,9 @@ func newPromHandler(ctx context.Context, logger log.Logger) http.HandlerFunc {
 			registry.MustRegister(iC)
 			if registerErr := clusterInfoRetriever.RegisterConsumer(iC); registerErr != nil {
 				_ = level.Error(logger).Log("msg", "failed to register indices collector in cluster info")
-				os.Exit(1)
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("failed to register indices collector in cluster info"))
+				return
 			}
 		}
 
